@@ -11,14 +11,21 @@ using OpenDOSM.Malaysia.Models;
 
 namespace OpenDOSM.Malaysia.Services;
 
-    public class GtfsRealtimeService
-    {
+/// <summary>
+/// Service for fetching and managing GTFS Realtime vehicle telemetry data.
+/// </summary>
+public class GtfsRealtimeService : IDisposable
+{
 
     private readonly HttpClient _httpClient;
     private readonly IMemoryCache _cache;
     private Timer? _pollingTimer;
     private string _currentEndpoint = "";
+    private int _pingLimitMs = 60000;
 
+    /// <summary>
+    /// Event triggered when vehicle data has been refreshed.
+    /// </summary>
     public event Action? DataRefreshed;
 
     internal GtfsRealtimeService(HttpClient httpClient)
@@ -32,6 +39,28 @@ namespace OpenDOSM.Malaysia.Services;
     private List<VehiclePositionModel> _allActiveVehicles = new();
     public string SelectedRouteId { get; private set; } = "";
 
+    /// <summary>
+    /// Configures the polling interval for the realtime data stream.
+    /// </summary>
+    /// <param name="seconds">The interval in seconds.</param>
+    /// <returns>The current <see cref="GtfsRealtimeService"/> instance for fluent chaining.</returns>
+    public GtfsRealtimeService WithPingLimitInSeconds(int seconds)
+    {
+        // Enforce a minimum of 30 seconds to prevent API abuse
+        int safeSeconds = Math.Max(30, seconds);
+        
+        _pingLimitMs = safeSeconds * 1000;
+        if (_pollingTimer != null)
+        {
+            _pollingTimer.Change(_pingLimitMs, _pingLimitMs);
+        }
+        return this;
+    }
+
+    /// <summary>
+    /// Starts polling the GTFS Realtime endpoint at the configured interval.
+    /// </summary>
+    /// <param name="endpoint">The category endpoint (e.g., 'ktmb', 'prasarana').</param>
     public void StartPolling(string endpoint)
     {
         _currentEndpoint = endpoint;
@@ -40,10 +69,13 @@ namespace OpenDOSM.Malaysia.Services;
         // Initial fetch
         _ = FetchGtfsRealtimeAsync();
         
-        // Poll every 1 minute
-        _pollingTimer = new Timer(async _ => await FetchGtfsRealtimeAsync(), null, 60000, 60000);
+        // Poll at the configured interval
+        _pollingTimer = new Timer(async _ => await FetchGtfsRealtimeAsync(), null, _pingLimitMs, _pingLimitMs);
     }
 
+    /// <summary>
+    /// Stops the active polling timer.
+    /// </summary>
     public void StopPolling()
     {
         if (_pollingTimer != null)
@@ -53,6 +85,19 @@ namespace OpenDOSM.Malaysia.Services;
         }
     }
 
+    /// <summary>
+    /// Disposes the polling timer and releases resources.
+    /// </summary>
+    public void Dispose()
+    {
+        StopPolling();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Sets the currently selected route ID and filters the active vehicles to only show vehicles on this route.
+    /// </summary>
+    /// <param name="routeId">The GTFS route ID to filter by.</param>
     public void SetSelectedRoute(string routeId)
     {
         SelectedRouteId = routeId;
@@ -126,6 +171,12 @@ namespace OpenDOSM.Malaysia.Services;
         }
     }
 
+    /// <summary>
+    /// Gets cached vehicle positions optionally filtered by a search query.
+    /// </summary>
+    /// <param name="endpoint">The category endpoint.</param>
+    /// <param name="query">An optional search term to filter by route ID, vehicle ID, or status.</param>
+    /// <returns>A list of cached vehicle positions.</returns>
     public List<VehiclePositionModel> GetCachedVehicles(string endpoint, string query = "")
     {
         if (_cache.TryGetValue($"vehicles_{endpoint}", out List<VehiclePositionModel>? vehicles) && vehicles != null)

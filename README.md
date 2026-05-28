@@ -55,3 +55,17 @@ Console.WriteLine($"1 USD = {today.Usd} MYR");
 The `OpenDosmClient` splits endpoints logically into two sections:
 - `OpenDosmClient.Instance.RealTime` (Weather, GTFS Live Data)
 - `OpenDosmClient.Instance.Static` (GTFS Routes/Stops, DOSM Data Catalogue)
+
+## Background Polling & Resource Management
+
+For Realtime GTFS, the library supports automated background polling. You can fluently configure the polling rate (minimum of 30 seconds) and easily stop operations to release active memory/timers when shutting down components.
+
+```csharp
+// Configure polling interval to 45 seconds and start
+OpenDosmClient.Instance.RealTime.Gtfs
+    .WithPingLimitInSeconds(45)
+    .StartPolling("ktmb");
+
+// Stop polling and dispose all background timers manually
+OpenDosmClient.Instance.Dispose();
+```
